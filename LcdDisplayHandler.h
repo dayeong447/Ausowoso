@@ -25,13 +25,13 @@ class LCDDisplay {
     const unsigned long scrollDelay = 500; // ms between scrolls
     
   public:
+  
     LCDDisplay() : lcd(LCD_ADDRESS, LCD_COLUMNS, LCD_ROWS) {}
     
     void initialize() {
       lcd.init();
       lcd.backlight();
       clear();
-      displayStatic("Disaster Alert", "System Ready");
     }
     
     void clear() {
@@ -50,14 +50,15 @@ class LCDDisplay {
     void displayEmergency(uint8_t region, DisasterType type, float severity, String action, bool flash = false) {
         static bool flashState = false;
         
-        if(flash && millis() - lastUpdateTime > 300) {
-          flashState = !flashState;
-          lastUpdateTime = millis();
-          if(flashState) lcd.noBacklight();
-          else lcd.backlight();
-        } else if(!flash) {
-          lcd.backlight();
-        }
+        // DIMATIKAN AGAR TIDAK KEDIP KEDIP PADA SAAT EMERGENCY
+        // if(flash && millis() - lastUpdateTime > 300) {
+        //   flashState = !flashState;
+        //   lastUpdateTime = millis();
+        //   if(flashState) lcd.noBacklight();
+        //   else lcd.backlight();
+        // } else if(!flash) {
+        //   lcd.backlight();
+        // }
         
         displayDisasterWarning(region, type, severity, action);
       }
