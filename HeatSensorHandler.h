@@ -18,7 +18,7 @@ private:
     static constexpr float FIRE_TEMP_UPPER_THRESHOLD = 400.0;
     static constexpr float FIRE_HUMIDITY_LOWER_THRESHOLD = 0.0;
     static constexpr float FIRE_HUMIDITY_UPPER_THRESHOLD = 100.0;
-    static constexpr float CRITICAL_TEMP_THRESHOLD = 60.0; // °C for critical emergency
+    static constexpr float CRITICAL_TEMP_THRESHOLD = 25.0; // °C for critical emergency
     static constexpr float CRITICAL_HUMIDITY_THRESHOLD = 30.0; // %
 
     // Test mode and validation

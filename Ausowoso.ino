@@ -21,10 +21,10 @@
 #define TRAFFIC_GREEN_PIN 4
 
 // Emergency thresholds
-#define FIRE_TEMP_THRESHOLD 30.0      // °C
+#define FIRE_TEMP_THRESHOLD 25.0      // °C
 #define FIRE_HUMIDITY_THRESHOLD 30.0  // %
-#define OBSTACLE_DISTANCE_THRESHOLD 50.0 // cm
-#define CRITICAL_TEMP_THRESHOLD 60.0  // °C for critical emergency
+#define OBSTACLE_DISTANCE_THRESHOLD 7.0 // cm
+#define CRITICAL_TEMP_THRESHOLD 25.0  // °C for critical emergency
 
 // System States
 enum SystemState {
@@ -323,6 +323,9 @@ void handleTrafficControl() {
 }
 
 void handleBarrierControl() {
+  if(barrierControl.status()){
+    return;
+  }
   // Safety check: Stop barrier if obstacle detected
   if (barrierControl.isInMotion() && distanceSensor.isObjectDetected(OBSTACLE_DISTANCE_THRESHOLD)) {
     if (!barrierControl.isStopped()) {

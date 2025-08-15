@@ -13,8 +13,8 @@ class BarrierControl {
     bool stopped;
     
     // Configurable positions
-    static const uint8_t RAISED_POS = 0;     // Barrier up
-    static const uint8_t LOWERED_POS = 360;   // Barrier down
+    static const uint8_t RAISED_POS = 90;     // Barrier up
+    static const uint8_t LOWERED_POS = 0;   // Barrier down
     static const uint8_t SPEED = 1;           // Degrees per update
     
     unsigned long lastUpdate;
@@ -25,35 +25,42 @@ class BarrierControl {
     
     void initialize() {
       barrierServo.attach(pin);
-      barrierServo.write(LOWERED_POS);
-      currentPos = LOWERED_POS;
+//      barrierServo.write(LOWERED_POS);
+      currentPos = RAISED_POS;
       delay(200);
     }
     
     void update() {
-      unsigned long now = millis();
-      if (now - lastUpdate < 30) return;  // ~33Hz update rate
-      lastUpdate = now;
-      
-      if (isMoving && !stopped && currentPos != targetPos) {
-        // Move towards target
-        if (currentPos < targetPos) {
-          currentPos = min(currentPos + SPEED, targetPos);
-        } else {
-          currentPos = max(currentPos - SPEED, targetPos);
-        }
-        
-        barrierServo.write(currentPos);
-        
-        // Check if reached target
+    unsigned long now = millis();
+    if (now - lastUpdate < 30) return;  // ~33Hz update rate
+    
+    if (isMoving && !stopped) {
+        // Periksa apakah sudah mencapai target
         if (currentPos == targetPos) {
-          isMoving = false;
+            isMoving = false;  // Pastikan flag diupdate
+        } 
+        else {
+            // Move towards target
+            if (currentPos < targetPos) {
+                currentPos = min(currentPos + SPEED, targetPos);
+            } else {
+                currentPos = max(currentPos - SPEED, targetPos);
+            }
+            
+            barrierServo.write(currentPos);
+            
+            // Update status ketika tepat mencapai target
+            if (currentPos == targetPos) {
+                isMoving = false;
+                isRaised = (targetPos == RAISED_POS);
+            }
         }
-      }
     }
+    lastUpdate = now;
+}
     
     void raise() {
-      if (!isRaised || stopped) {
+      if (!isRaised) {
         isRaised = true;
         targetPos = RAISED_POS;
         isMoving = true;
