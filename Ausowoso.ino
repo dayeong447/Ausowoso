@@ -4,6 +4,7 @@
 #include "BarrierServoHandler.h"
 #include "HeatSensorHandler.h"
 #include "DistanceSensorHandler.h"
+#include "EmergencyTraffic.h"
 
 // System Configuration
 #define SYSTEM_UPDATE_INTERVAL 100    // Main loop update interval (ms)
@@ -19,6 +20,13 @@
 #define TRAFFIC_RED_PIN 2
 #define TRAFFIC_YELLOW_PIN 3
 #define TRAFFIC_GREEN_PIN 4
+#define RIGHT_RED_PIN 8
+#define RIGHT_GREEN_PIN 9
+#define LEFT_RED_PIN 10
+#define LEFT_GREEN_PIN 11
+#define CENTER_RED_PIN 12
+#define CENTER_GREEN_PIN 13
+
 
 // Emergency thresholds
 #define FIRE_TEMP_THRESHOLD 25.0      // °C
@@ -41,6 +49,9 @@ DistanceSensorHandler distanceSensor(DISTANCE_TRIGGER_PIN, DISTANCE_ECHO_PIN);
 BarrierControl barrierControl(BARRIER_SERVO_PIN);
 LCDDisplay lcdDisplay;
 TrafficLight trafficLight(TRAFFIC_RED_PIN, TRAFFIC_YELLOW_PIN, TRAFFIC_GREEN_PIN);
+EmergencyTraffic traffic(RIGHT_RED_PIN, RIGHT_GREEN_PIN,
+                        LEFT_RED_PIN, LEFT_GREEN_PIN,
+                        CENTER_RED_PIN, CENTER_GREEN_PIN);
 
 // System Variables
 SystemState currentState = NORMAL_OPERATION;
@@ -67,6 +78,28 @@ void handleSerialCommands();
 void activateEmergencyMode();
 void deactivateEmergencyMode();
 void displaySystemInfo();
+
+
+#define RUN_UNIT_TESTS
+#ifdef RUN_UNIT_TESTS
+#include "UnitTest.h"
+
+SmartCityTestSuite testSuite(
+    DHT_SENSOR_PIN, DISTANCE_TRIGGER_PIN, DISTANCE_ECHO_PIN, BARRIER_SERVO_PIN,
+    TRAFFIC_RED_PIN, TRAFFIC_YELLOW_PIN, TRAFFIC_GREEN_PIN,
+    RIGHT_RED_PIN, RIGHT_GREEN_PIN, 
+    LEFT_RED_PIN, LEFT_GREEN_PIN,
+    CENTER_RED_PIN, CENTER_GREEN_PIN
+);
+
+void setup() {
+  Serial.begin(SERIAL_BAUD_RATE);
+  testSuite.runAllTests();
+}
+void loop() {
+  
+}
+#else
 
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
@@ -114,7 +147,7 @@ void loop() {
   // Small delay to prevent overwhelming the system
   delay(10);
 }
-
+#endif
 void initializeSystem() {
   // Initialize LCD Display
   lcdDisplay.initialize();
