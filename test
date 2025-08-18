@@ -1,0 +1,63 @@
+from ultralytics import YOLO
+import cv2
+import serial
+import time
+import requests
+# 1. 아두이노 시리얼 포트 객체 생성 (포트 번호 & 속도 수정 필요)
+ser = serial.Serial(
+    port = 'COM7', 
+    baudrate=9600, 
+    parity='N',
+    stopbits=1,
+    bytesize=8,
+    timeout=8
+    )
+time.sleep(2)
+
+# 2. YOLO 모델 로드
+model = YOLO("C:/Users/perid/data/runs/detect/train2/weights/best.pt")
+
+# 3. 카메라 열기 ESP32-CAM 사용으로 인해 수정 필요
+# cap = cv2.VideoCapture(0)# ESP32-CAM 스트리밍 주소 (시리얼 모니터에서 확인)
+# esp32_url = "http://192.168.207.47:81/stream"
+#cap = cv2.VideoCapture(esp32_url)
+cap = cv2.VideoCapture("http://192.168.207.47:81/stream")
+
+cv2.namedWindow("Fire Detection", cv2.WND_PROP_FULLSCREEN)
+cv2.setWindowProperty("Fire Detection", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        print("카메라에서 영상을 가져올 수 없습니다.")
+        break
+
+    # 4. YOLO 추론
+    results = model(frame)
+    annotated_frame = results[0].plot()
+
+    # 5. 'fire' 클래스 감지 여부 확인 여기
+    fire_detected = False
+    for box in results[0].boxes:
+        cls = int(box.cls[0])
+        label = model.names[cls]
+        if label.lower() == "fire":  # 클래스 이름이 'fire'라면
+            fire_detected = True
+            break
+
+    # 6. 아두이노로 데이터 전송
+    if fire_detected:
+        ser.write(b'1')  # 화재 발생
+    else:
+        ser.write(b'0')  # 화재 없음
+
+    # 7. 결과 화면 표시
+    cv2.imshow("Fire Detection", annotated_frame)
+
+    if cv2.waitKey(1) & 0xFF == 27:  # ESC 종료
+        break
+
+# 8. 자원 해제
+cap.release()
+cv2.destroyAllWindows()
+ser.close()
