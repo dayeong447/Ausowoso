@@ -1,8 +1,6 @@
 #ifndef EMERGENCY_TRAFFIC_H
 #define EMERGENCY_TRAFFIC_H
 
-#include <Arduino.h>
-
 class EmergencyTraffic {
 private:
     // Pin configuration for 3 directions (Right, Left, Center)

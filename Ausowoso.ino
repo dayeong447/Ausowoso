@@ -1,10 +1,13 @@
 #include <Arduino.h>
+#include <SoftwareSerial.h>
 #include "TrafficLightHandler.h"
 #include "LcdDisplayHandler.h"
 #include "BarrierServoHandler.h"
 #include "HeatSensorHandler.h"
 #include "DistanceSensorHandler.h"
 #include "EmergencyTraffic.h"
+#include "BuzzerHandler.h"
+#include "GasSensorHandler.h"
 
 // System Configuration
 #define SYSTEM_UPDATE_INTERVAL 100    // Main loop update interval (ms)
@@ -14,6 +17,8 @@
 
 // Pin Configuration
 #define DHT_SENSOR_PIN 7
+#define BUZZER_PIN 1
+#define GAS_SENSOR_PIN A0
 #define DISTANCE_TRIGGER_PIN 5
 #define DISTANCE_ECHO_PIN 6
 #define BARRIER_SERVO_PIN 9
@@ -33,6 +38,8 @@
 #define FIRE_HUMIDITY_THRESHOLD 30.0  // %
 #define OBSTACLE_DISTANCE_THRESHOLD 7.0 // cm
 #define CRITICAL_TEMP_THRESHOLD 25.0  // °C for critical emergency
+#define WARNING_GAS_THRESHOLD 150.0
+#define DANGER_GAS_THRESHOLD 800.0
 
 // System States
 enum SystemState {
@@ -45,9 +52,11 @@ enum SystemState {
 
 // Global Objects
 DHTSensor dhtSensor(DHT_SENSOR_PIN);
+Buzzer buzzer(BUZZER_PIN);
 DistanceSensorHandler distanceSensor(DISTANCE_TRIGGER_PIN, DISTANCE_ECHO_PIN);
 BarrierControl barrierControl(BARRIER_SERVO_PIN);
 LCDDisplay lcdDisplay;
+GasSensor co2Sensor(GAS_SENSOR_PIN);
 TrafficLight trafficLight(TRAFFIC_RED_PIN, TRAFFIC_YELLOW_PIN, TRAFFIC_GREEN_PIN);
 EmergencyTraffic traffic(RIGHT_RED_PIN, RIGHT_GREEN_PIN,
                         LEFT_RED_PIN, LEFT_GREEN_PIN,
@@ -74,35 +83,42 @@ void forceUpdateDisplay();  // New function for immediate update
 void handleTrafficControl();
 void handleBarrierControl();
 void logSystemStatus();
-void handleSerialCommands();
 void activateEmergencyMode();
 void deactivateEmergencyMode();
 void displaySystemInfo();
 
 
-#define RUN_UNIT_TESTS
+//#define RUN_UNIT_TESTS
+#define RUN_MASTER
+//#define RUN_SLAVE
 #ifdef RUN_UNIT_TESTS
 #include "UnitTest.h"
 
-SmartCityTestSuite testSuite(
+SmartCityUnitTest testSuite(
     DHT_SENSOR_PIN, DISTANCE_TRIGGER_PIN, DISTANCE_ECHO_PIN, BARRIER_SERVO_PIN,
     TRAFFIC_RED_PIN, TRAFFIC_YELLOW_PIN, TRAFFIC_GREEN_PIN,
     RIGHT_RED_PIN, RIGHT_GREEN_PIN, 
     LEFT_RED_PIN, LEFT_GREEN_PIN,
-    CENTER_RED_PIN, CENTER_GREEN_PIN
+    CENTER_RED_PIN, CENTER_GREEN_PIN, 
+    BUZZER_PIN, GAS_SENSOR_PIN
 );
 
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
-  testSuite.runAllTests();
+  testSuite.runAllStressTests();
 }
 void loop() {
   
 }
-#else
+#elif defined(RUN_MASTER)
+
+SoftwareSerial slave1(10, -1);
+SoftwareSerial slave2(12, -1);
 
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
+  slave1.begin(SERIAL_BAUD_RATE);
+  slave2.begin(SERIAL_BAUD_RATE);
   
   Serial.println(F("================================"));
   Serial.println(F("🌆 SMART CITY DISASTER SYSTEM"));
@@ -141,57 +157,67 @@ void loop() {
     forceDisplayUpdate = false;  // Reset force flag
   }
   
-  // Handle serial commands
-  handleSerialCommands();
+  
+  // Small delay to prevent overwhelming the system
+  delay(10);
+}
+#elif defined(RUN_SLAVE)
+
+void setup() {
+  Serial.begin(SERIAL_BAUD_RATE);
+  slave1.begin(SERIAL_BAUD_RATE);
+  slave2.begin(SERIAL_BAUD_RATE);
+  
+  Serial.println(F("================================"));
+  Serial.println(F("🌆 SMART CITY DISASTER SYSTEM"));
+  Serial.println(F("================================"));
+  Serial.println(F("Initializing hardware..."));
+  
+  initializeSystem();
+  
+  Serial.println(F("✅ System Ready!"));
+  Serial.println(F("================================"));
+}
+
+void loop() {
+  unsigned long currentTime = millis();
+  
+  // Main system update loop
+  if (currentTime - lastSystemUpdate >= SYSTEM_UPDATE_INTERVAL) {
+    updateSensors();
+    handleBarrierControl();
+    handleTrafficControl();
+    lastSystemUpdate = currentTime;
+  }
+  
+  // Emergency condition checking
+  if (currentTime - lastEmergencyCheck >= EMERGENCY_CHECK_INTERVAL) {
+    checkEmergencyConditions();
+    
+    handleSystemState();
+    lastEmergencyCheck = currentTime;
+  }
+  
+  // Display updates (regular interval OR forced update)
+  if (currentTime - lastStatusUpdate >= STATUS_DISPLAY_INTERVAL || forceDisplayUpdate) {
+    updateDisplay();
+    logSystemStatus();
+    lastStatusUpdate = currentTime;
+    forceDisplayUpdate = false;  // Reset force flag
+  }
+  
   
   // Small delay to prevent overwhelming the system
   delay(10);
 }
 #endif
-void initializeSystem() {
-  // Initialize LCD Display
-  lcdDisplay.initialize();
-  lcdDisplay.displayStatic("System Init", "Starting...");
-  delay(1000);
-  
-  // Initialize DHT Sensor
-  dhtSensor.initialize();
-  lcdDisplay.displayStatic("DHT Sensor", "Initialized");
-  delay(500);
-  
-  // Initialize Distance Sensor
-  distanceSensor.initialize();
-  lcdDisplay.displayStatic("Distance Sensor", "Initialized");
-  delay(500);
-  
-  // Initialize Barrier Control
-  barrierControl.initialize();
-  barrierControl.raise(); // Start with barrier up
-  lcdDisplay.displayStatic("Barrier Control", "Initialized");
-  delay(500);
-  
-  // Initialize Traffic Light
-  trafficLight.initialize();
-  lcdDisplay.displayStatic("Traffic Light", "Initialized");
-  delay(500);
-  
-  // Set initial safe values
-  currentState = NORMAL_OPERATION;
-  barrierDeployed = false;
-  systemInitialized = true;
-  
-  lcdDisplay.displayStatic("System Ready", "Normal Operation");
-  delay(1000);
-  
-  // Force initial display update
-  forceDisplayUpdate = true;
-}
 
 void updateSensors() {
   // Update all sensors
   dhtSensor.update();
   distanceSensor.update();
   barrierControl.update();
+  co2Sensor.update();
 }
 
 void checkEmergencyConditions() {
@@ -200,6 +226,9 @@ void checkEmergencyConditions() {
   float temperature = dhtSensor.getTemperature();
   float humidity = dhtSensor.getHumidity();
   bool isCritical = dhtSensor.isCritical();
+  bool isGasLeak = co2Sensor.isDanger();
+  
+
   
   // Check for fire conditions
   bool fireDetected = (temperature > FIRE_TEMP_THRESHOLD && humidity < FIRE_HUMIDITY_THRESHOLD) || 
@@ -208,9 +237,9 @@ void checkEmergencyConditions() {
   // State transitions
   switch (currentState) {
     case NORMAL_OPERATION:
-      if (fireDetected || isCritical) {
+      if (fireDetected || isCritical || isGasLeak) {
         activateEmergencyMode();
-        currentState = EMERGENCY_DETECTED;
+        currentState = EMERGENCY_DETECTED;   
         emergencyStartTime = millis();
         forceDisplayUpdate = true;  // Force immediate LCD update
         Serial.println(F("🚨 EMERGENCY TRIGGERED - Updating LCD..."));
@@ -237,7 +266,7 @@ void checkEmergencyConditions() {
       
     case EVACUATION_MODE:
       // Stay in evacuation mode until manually reset or conditions clear
-      if (!fireDetected && !isCritical && (millis() - emergencyStartTime > 30000)) {
+      if (!fireDetected && !isCritical && !isGasLeak && (millis() - emergencyStartTime > 30000)) {
         // Auto-recovery after 30 seconds if conditions are safe
         deactivateEmergencyMode();
       }
@@ -253,34 +282,71 @@ void handleSystemState() {
   if (currentState != previousState) {
     Serial.print(F("🔄 State Change: "));
     
-    // Print state names instead of numbers
-    switch(previousState) {
-      case NORMAL_OPERATION: Serial.print(F("NORMAL")); break;
-      case EMERGENCY_DETECTED: Serial.print(F("EMERGENCY")); break;
-      case BARRIER_DEPLOYING: Serial.print(F("DEPLOYING")); break;
-      case EVACUATION_MODE: Serial.print(F("EVACUATION")); break;
-      case SYSTEM_ERROR: Serial.print(F("ERROR")); break;
-    }
-    
+    // Print state names dengan PROGMEM strings
+    printStateName(previousState);
     Serial.print(F(" -> "));
-    
-    switch(currentState) {
-      case NORMAL_OPERATION: Serial.print(F("NORMAL")); break;
-      case EMERGENCY_DETECTED: Serial.print(F("EMERGENCY")); break;
-      case BARRIER_DEPLOYING: Serial.print(F("DEPLOYING")); break;
-      case EVACUATION_MODE: Serial.print(F("EVACUATION")); break;
-      case SYSTEM_ERROR: Serial.print(F("ERROR")); break;
-    }
-    
+    printStateName(currentState);
     Serial.println();
     
     previousState = currentState;
-    
-    // Force immediate display update on state change
     forceDisplayUpdate = true;
-    Serial.println(F("📺 Forcing LCD update due to state change"));
   }
 }
+void printStateName(SystemState state) {
+  switch(state) {
+    case NORMAL_OPERATION: Serial.print(F("NORMAL")); break;
+    case EMERGENCY_DETECTED: Serial.print(F("EMERGENCY")); break;
+    case BARRIER_DEPLOYING: Serial.print(F("DEPLOYING")); break;
+    case EVACUATION_MODE: Serial.print(F("EVACUATION")); break;
+    case SYSTEM_ERROR: Serial.print(F("ERROR")); break;
+  }
+}
+
+void initializeSystem() {
+  // Initialize LCD Display
+  lcdDisplay.initialize();
+  lcdDisplay.displayStatic(F("System Init"), F("Starting..."));
+  delay(1000);
+  
+  // Initialize DHT Sensor
+  dhtSensor.initialize();
+  lcdDisplay.displayStatic(F("DHT Sensor"), F("Initialized"));
+  delay(500);
+  
+  // Initialize Gas Sensor
+  co2Sensor.initialize();
+  co2Sensor.setThresholds(WARNING_GAS_THRESHOLD, DANGER_GAS_THRESHOLD);
+  lcdDisplay.displayStatic(F("Gas Sensor"), F("Initialized"));
+  delay(500);
+  
+  // Initialize Distance Sensor
+  distanceSensor.initialize();
+  lcdDisplay.displayStatic(F("Distance Sensor"), F("Initialized"));
+  delay(500);
+  
+  // Initialize Barrier Control
+  barrierControl.initialize();
+  barrierControl.raise();
+  lcdDisplay.displayStatic(F("Barrier Control"), F("Initialized"));
+  delay(500);
+  
+  // Initialize Traffic Light
+  trafficLight.initialize();
+  lcdDisplay.displayStatic(F("Traffic Light"), F("Initialized"));
+  delay(500);
+  
+  // Set initial safe values
+  currentState = NORMAL_OPERATION;
+  barrierDeployed = false;
+  systemInitialized = true;
+  
+  lcdDisplay.displayStatic(F("System Ready"), F("Normal Operation"));
+  delay(1000);
+  
+  // Force initial display update
+  forceDisplayUpdate = true;
+}
+
 
 void updateDisplay() {
   float temperature = dhtSensor.getTemperature();
@@ -293,9 +359,21 @@ void updateDisplay() {
     case NORMAL_OPERATION:
       {
         Serial.println(F("NORMAL"));
-        String line1 = "T:" + String(temperature, 1) + "C H:" + String(humidity, 0) + "%";
-        String line2 = "Dist:" + String(distance, 0) + "cm NORMAL";
-        lcdDisplay.displayStatic(line1, line2);
+        
+        // OPTIMIZED: Direct LCD printing instead of String concatenation
+        // This saves significant RAM by avoiding String object creation
+        lcdDisplay.lcd.clear();
+        lcdDisplay.lcd.setCursor(0, 0);
+        lcdDisplay.lcd.print(F("T:"));
+        lcdDisplay.lcd.print(temperature, 1);
+        lcdDisplay.lcd.print(F("C H:"));
+        lcdDisplay.lcd.print(humidity, 0);
+        lcdDisplay.lcd.print(F("%"));
+        
+        lcdDisplay.lcd.setCursor(0, 1);
+        lcdDisplay.lcd.print(F("Dist:"));
+        lcdDisplay.lcd.print(distance, 0);
+        lcdDisplay.lcd.print(F("cm NORMAL"));
       }
       break;
       
@@ -376,6 +454,7 @@ void handleBarrierControl() {
 }
 
 void logSystemStatus() {
+  // Gunakan F() macro untuk semua string literals
   Serial.print(F("📊 Status: "));
   
   switch (currentState) {
@@ -392,63 +471,15 @@ void logSystemStatus() {
   Serial.print(dhtSensor.getHumidity());
   Serial.print(F("% | Dist:"));
   Serial.print(distanceSensor.getDistance());
-  Serial.print(F("cm | Barrier:"));
-  Serial.print(barrierControl.status() ? "UP" : "DOWN");
+  Serial.print(F("cm | CO2:"));
+  Serial.print(co2Sensor.getCO2());
+  Serial.print(F("ppm | Barrier:"));
+  Serial.print(barrierControl.status() ? F("UP") : F("DOWN"));
   
   if (barrierControl.isInMotion()) Serial.print(F("(MOVING)"));
   if (barrierControl.isStopped()) Serial.print(F("(STOPPED)"));
   
   Serial.println();
-}
-
-void handleSerialCommands() {
-  if (Serial.available()) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
-    command.toLowerCase();
-    
-    if (command == "status") {
-      displaySystemInfo();
-    }
-    else if (command == "emergency") {
-      Serial.println(F("🚨 Manual Emergency Activation"));
-      activateEmergencyMode();
-      currentState = EMERGENCY_DETECTED;
-      forceUpdateDisplay();  // Force immediate LCD update
-    }
-    else if (command == "normal") {
-      Serial.println(F("✅ Manual Normal Mode"));
-      deactivateEmergencyMode();
-      forceUpdateDisplay();  // Force immediate LCD update
-    }
-    else if (command == "barrier") {
-      if (barrierControl.status()) {
-        barrierControl.lower();
-        Serial.println(F("🚧 Lowering barrier"));
-      } else {
-        barrierControl.raise();
-        Serial.println(F("🚧 Raising barrier"));
-      }
-      forceUpdateDisplay();  // Force immediate LCD update
-    }
-    else if (command == "lcd") {
-      Serial.println(F("🔄 Manual LCD Update"));
-      forceUpdateDisplay();
-    }
-    else if (command == "info") {
-      Serial.println(F("\n=== SYSTEM INFORMATION ==="));
-      Serial.println(F("Commands available:"));
-      Serial.println(F("- 'status': Show detailed status"));
-      Serial.println(F("- 'emergency': Force emergency mode"));
-      Serial.println(F("- 'normal': Return to normal mode"));
-      Serial.println(F("- 'barrier': Toggle barrier"));
-      Serial.println(F("- 'lcd': Force LCD update"));
-      Serial.println(F("- 'info': Show this help"));
-    }
-    else if (command.length() > 0) {
-      Serial.println(F("❌ Unknown command. Type 'info' for help."));
-    }
-  }
 }
 
 void activateEmergencyMode() {
@@ -464,6 +495,7 @@ void activateEmergencyMode() {
   }
   
   emergencyStartTime = millis();
+  buzzer.alertDanger();
   
   // Force immediate LCD update
   forceUpdateDisplay();
@@ -483,7 +515,8 @@ void deactivateEmergencyMode() {
   
   // Resume normal traffic operation
   trafficLight.initialize(); // Reset to normal cycle
-  
+
+  buzzer.stop();
   // Force immediate LCD update
   forceUpdateDisplay();
 }

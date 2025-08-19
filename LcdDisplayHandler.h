@@ -12,19 +12,19 @@
 // Disaster types
 enum DisasterType {
   NONE,
-  EARTHQUAKE,  // Re-added earthquake
+  EARTHQUAKE,
   FIRE,
-  FLOOD,       // Added missing FLOOD type
+  FLOOD,
   GAS_LEAK
 };
 
 class LCDDisplay {
   private:
-    LiquidCrystal_I2C lcd;
     unsigned long lastUpdateTime = 0;
-    const unsigned long scrollDelay = 500; // ms between scrolls
+    const unsigned long scrollDelay = 500;
     
   public:
+    LiquidCrystal_I2C lcd; // Made public for direct access optimization
   
     LCDDisplay() : lcd(LCD_ADDRESS, LCD_COLUMNS, LCD_ROWS) {}
     
@@ -38,6 +38,7 @@ class LCDDisplay {
       lcd.clear();
     }
     
+    // BACKWARD COMPATIBLE: Keep original String version
     void displayStatic(String line1, String line2 = "") {
       lcd.clear();
       lcd.setCursor(0, 0);
@@ -47,21 +48,34 @@ class LCDDisplay {
         lcd.print(line2);
       }
     }
+    
+    // OPTIMIZED: Add const char* version for F() macro support
+    void displayStatic(const char* line1, const char* line2 = nullptr) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print(line1);
+      if (line2 != nullptr) {
+        lcd.setCursor(0, 1);
+        lcd.print(line2);
+      }
+    }
+    
+    // OPTIMIZED: Support F() macro directly
+    void displayStatic(const __FlashStringHelper* line1, const __FlashStringHelper* line2 = nullptr) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print(line1);
+      if (line2 != nullptr) {
+        lcd.setCursor(0, 1);
+        lcd.print(line2);
+      }
+    }
+    
     void displayEmergency(uint8_t region, DisasterType type, float severity, String action, bool flash = false) {
         static bool flashState = false;
-        
-        // DIMATIKAN AGAR TIDAK KEDIP KEDIP PADA SAAT EMERGENCY
-        // if(flash && millis() - lastUpdateTime > 300) {
-        //   flashState = !flashState;
-        //   lastUpdateTime = millis();
-        //   if(flashState) lcd.noBacklight();
-        //   else lcd.backlight();
-        // } else if(!flash) {
-        //   lcd.backlight();
-        // }
-        
-        displayDisasterWarning(region, type, severity, action);
+        displayDisasterWarning(region, type, severity, action.c_str());
       }
+      
     void displayDisasterWarning(uint8_t region, DisasterType type, float severity, String action) {
       String typeStr;
       String unit;
@@ -129,7 +143,6 @@ class LCDDisplay {
         if (displayText.length() > LCD_COLUMNS) {
           displayText = displayText.substring(0, LCD_COLUMNS);
         } else {
-          // Add padding if text is shorter than display
           while (displayText.length() < LCD_COLUMNS) {
             displayText += " ";
           }
