@@ -58,7 +58,7 @@ BarrierControl barrierControl(BARRIER_SERVO_PIN);
 LCDDisplay lcdDisplay;
 GasSensor co2Sensor(GAS_SENSOR_PIN);
 TrafficLight trafficLight(TRAFFIC_RED_PIN, TRAFFIC_YELLOW_PIN, TRAFFIC_GREEN_PIN);
-EmergencyTraffic traffic(RIGHT_RED_PIN, RIGHT_GREEN_PIN,
+EmergencyTraffic emergencyLight(RIGHT_RED_PIN, RIGHT_GREEN_PIN,
                         LEFT_RED_PIN, LEFT_GREEN_PIN,
                         CENTER_RED_PIN, CENTER_GREEN_PIN);
 
@@ -73,6 +73,13 @@ bool barrierDeployed = false;
 bool systemInitialized = false;
 bool forceDisplayUpdate = false;  // Flag to force immediate LCD update
 
+// EMERGENCY LIGHT PATTERN
+const char EMERGENCY_PATTERN = '1'; // RRR (semua merah)
+const char NORMAL_PATTERNS[4] = {'2','3','4','1'}; // GYY, YGY, YYG, RRR
+int currentNormalPattern = 0;
+unsigned long lastPatternUpdate = 0;
+
+
 // Function Declarations
 void initializeSystem();
 void updateSensors();
@@ -86,6 +93,10 @@ void logSystemStatus();
 void activateEmergencyMode();
 void deactivateEmergencyMode();
 void displaySystemInfo();
+
+
+SoftwareSerial slave1(10, 11);
+SoftwareSerial slave2(12, 13);
 
 
 //#define RUN_UNIT_TESTS
@@ -111,9 +122,6 @@ void loop() {
   
 }
 #elif defined(RUN_MASTER)
-
-SoftwareSerial slave1(10, -1);
-SoftwareSerial slave2(12, -1);
 
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
@@ -163,53 +171,6 @@ void loop() {
 }
 #elif defined(RUN_SLAVE)
 
-void setup() {
-  Serial.begin(SERIAL_BAUD_RATE);
-  slave1.begin(SERIAL_BAUD_RATE);
-  slave2.begin(SERIAL_BAUD_RATE);
-  
-  Serial.println(F("================================"));
-  Serial.println(F("🌆 SMART CITY DISASTER SYSTEM"));
-  Serial.println(F("================================"));
-  Serial.println(F("Initializing hardware..."));
-  
-  initializeSystem();
-  
-  Serial.println(F("✅ System Ready!"));
-  Serial.println(F("================================"));
-}
-
-void loop() {
-  unsigned long currentTime = millis();
-  
-  // Main system update loop
-  if (currentTime - lastSystemUpdate >= SYSTEM_UPDATE_INTERVAL) {
-    updateSensors();
-    handleBarrierControl();
-    handleTrafficControl();
-    lastSystemUpdate = currentTime;
-  }
-  
-  // Emergency condition checking
-  if (currentTime - lastEmergencyCheck >= EMERGENCY_CHECK_INTERVAL) {
-    checkEmergencyConditions();
-    
-    handleSystemState();
-    lastEmergencyCheck = currentTime;
-  }
-  
-  // Display updates (regular interval OR forced update)
-  if (currentTime - lastStatusUpdate >= STATUS_DISPLAY_INTERVAL || forceDisplayUpdate) {
-    updateDisplay();
-    logSystemStatus();
-    lastStatusUpdate = currentTime;
-    forceDisplayUpdate = false;  // Reset force flag
-  }
-  
-  
-  // Small delay to prevent overwhelming the system
-  delay(10);
-}
 #endif
 
 void updateSensors() {
@@ -243,6 +204,7 @@ void checkEmergencyConditions() {
         emergencyStartTime = millis();
         forceDisplayUpdate = true;  // Force immediate LCD update
         Serial.println(F("🚨 EMERGENCY TRIGGERED - Updating LCD..."));
+       
       }
       break;
       
@@ -292,6 +254,29 @@ void handleSystemState() {
     forceDisplayUpdate = true;
   }
 }
+void sendTrafficPatterns(bool emergencyMode) {
+  if (emergencyMode) {
+    // Kirim pola emergency ke semua slave
+    slave1.print(EMERGENCY_PATTERN);
+    slave1.print(EMERGENCY_PATTERN);
+    slave2.print(EMERGENCY_PATTERN);
+    slave2.print(EMERGENCY_PATTERN);
+  } else {
+    // Kirim pola normal (berputar)
+    char pattern1 = NORMAL_PATTERNS[currentNormalPattern];
+    char pattern2 = NORMAL_PATTERNS[(currentNormalPattern + 1) % 4];
+    char pattern3 = NORMAL_PATTERNS[(currentNormalPattern + 2) % 4];
+    char pattern4 = NORMAL_PATTERNS[(currentNormalPattern + 3) % 4];
+    
+    slave1.print(pattern1);
+    slave1.print(pattern2);
+    slave2.print(pattern3);
+    slave2.print(pattern4);
+    
+    currentNormalPattern = (currentNormalPattern + 1) % 4;
+  }
+}
+
 void printStateName(SystemState state) {
   switch(state) {
     case NORMAL_OPERATION: Serial.print(F("NORMAL")); break;
@@ -454,31 +439,81 @@ void handleBarrierControl() {
 }
 
 void logSystemStatus() {
-  // Gunakan F() macro untuk semua string literals
-  Serial.print(F("📊 Status: "));
+  // Use F() macro for all string literals to save memory
+  Serial.print(F("📊 System Status: "));
   
+  // System state with emojis
   switch (currentState) {
-    case NORMAL_OPERATION: Serial.print(F("NORMAL")); break;
-    case EMERGENCY_DETECTED: Serial.print(F("🚨EMERGENCY")); break;
-    case BARRIER_DEPLOYING: Serial.print(F("🚧DEPLOYING")); break;
-    case EVACUATION_MODE: Serial.print(F("🏃EVACUATION")); break;
-    case SYSTEM_ERROR: Serial.print(F("❌ERROR")); break;
+    case NORMAL_OPERATION: 
+      Serial.print(F("🟢 NORMAL")); 
+      break;
+    case EMERGENCY_DETECTED: 
+      Serial.print(F("🚨 EMERGENCY DETECTED")); 
+      break;
+    case BARRIER_DEPLOYING: 
+      Serial.print(F("🚧 BARRIER DEPLOYING")); 
+      break;
+    case EVACUATION_MODE: 
+      Serial.print(F("🏃 EVACUATION MODE")); 
+      break;
+    case SYSTEM_ERROR: 
+      Serial.print(F("❌ SYSTEM ERROR")); 
+      break;
   }
   
-  Serial.print(F(" | T:"));
-  Serial.print(dhtSensor.getTemperature());
-  Serial.print(F("°C H:"));
-  Serial.print(dhtSensor.getHumidity());
-  Serial.print(F("% | Dist:"));
-  Serial.print(distanceSensor.getDistance());
-  Serial.print(F("cm | CO2:"));
+  // Environmental sensors
+  Serial.print(F(" | 🌡️ T:"));
+  Serial.print(dhtSensor.getTemperature(), 1);
+  Serial.print(F("°C 💧 H:"));
+  Serial.print(dhtSensor.getHumidity(), 0);
+  Serial.print(F("% | 📏 Dist:"));
+  Serial.print(distanceSensor.getDistance(), 1);
+  Serial.print(F("cm | ☁️ CO2:"));
   Serial.print(co2Sensor.getCO2());
-  Serial.print(F("ppm | Barrier:"));
-  Serial.print(barrierControl.status() ? F("UP") : F("DOWN"));
+  Serial.print(F("ppm"));
   
-  if (barrierControl.isInMotion()) Serial.print(F("(MOVING)"));
-  if (barrierControl.isStopped()) Serial.print(F("(STOPPED)"));
+  // Barrier status
+  Serial.print(F(" | 🚧 Barrier:"));
+  if (barrierControl.isInMotion()) {
+    Serial.print(barrierControl.status() ? F("🔼 RAISING") : F("🔽 LOWERING"));
+  } else {
+    Serial.print(barrierControl.status() ? F("🟢 UP") : F("🔴 DOWN"));
+  }
+  if (barrierControl.isStopped()) Serial.print(F(" (🛑 STOPPED)"));
   
+  // Master traffic light status
+  Serial.print(F(" | 🚦 Master Lights: "));
+  switch(trafficLight.getPhase()) {
+    case PHASE_RED: Serial.print(F("🔴 RED")); break;
+    case PHASE_RED_YELLOW: Serial.print(F("🔴🟡 RED+YELLOW")); break;
+    case PHASE_GREEN: Serial.print(F("🟢 GREEN")); break;
+    case PHASE_YELLOW: Serial.print(F("🟡 YELLOW")); break;
+  }
+  
+  // Emergency traffic status (master)
+//  Serial.print(F(" | 🚨 Emergency Routes: "));
+//  Serial.print(emergencyLight.isLeftGo() ? F("⬅️ ") : F("⛔ "));
+//  Serial.print(emergencyLight.isCenterGo() ? F("⬆️ ") : F("⛔ "));
+//  Serial.print(emergencyLight.isRightGo() ? F("➡️") : F("⛔"));
+//  
+  // Slave communication status
+//  static unsigned long lastCommTime = 0;
+//  bool commActive = (millis() - lastPatternUpdate < 5000);
+//  Serial.print(F(" | 📡 Slaves: "));
+//  Serial.print(commActive ? F("🟢 CONNECTED") : F("🔴 DISCONNECTED"));
+//  
+  // Current pattern sent to slaves
+//  Serial.print(F(" | 🔄 Pattern: "));
+//  if (currentState != NORMAL_OPERATION) {
+//    Serial.print(F("EMERGENCY (ALL 🔴)"));
+//  } else {
+//    Serial.print(F("Normal "));
+//    Serial.print(NORMAL_PATTERNS[currentNormalPattern]);
+//    Serial.print(F(" ("));
+//    Serial.print(getPatternName(NORMAL_PATTERNS[currentNormalPattern]));
+//    Serial.print(F(")"));
+//  }
+//  
   Serial.println();
 }
 
@@ -487,6 +522,10 @@ void activateEmergencyMode() {
   
   // Set emergency traffic lights
   trafficLight.setPhase(PHASE_RED);
+
+  Serial.println("Sending Emergency");
+   slave1.write('1');
+   slave2.write('1');
   
   // Prepare barrier for deployment
   if (barrierControl.status()) {
@@ -506,6 +545,10 @@ void deactivateEmergencyMode() {
   
   currentState = NORMAL_OPERATION;
   barrierDeployed = false;
+
+  Serial.println("Sending Normal");
+  slave1.write("0");
+  slave2.write("0");
   
   // Raise barrier if it's down
   if (!barrierControl.status()) {
